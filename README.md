@@ -54,3 +54,19 @@ graph TD
     J --> K((Agent 3: Lesson Planner AI<br/>Pedagogical Synthesis))
     K -->|Markdown Text| L[JavaScript Code<br/>Safe API Chunking Algorithm]
     L -->|notionBlocks Array| M[Notion Integration<br/>Publish Final Study Guide]
+```
+## 6. Current Limitations & Future Improvements
+
+While the current workflow successfully implements an autonomous multi-agent RAG pipeline, real-world testing has highlighted a few architectural limitations that will be addressed in future iterations.
+
+### Current Challenges
+1. **Loss of Multi-Modal Data (Tables & Diagrams):** Technical research papers heavily rely on complex tables, architectural diagrams, and visual charts. The current deterministic `Extract from File` node strictly parses raw text, meaning critical visual data is stripped out before the AI agents can analyze it.
+2. **Lack of Source Traceability:** The `Information Extractor AI` successfully pulls complex mathematical and algorithmic concepts, but it does not map these extractions back to the exact page numbers or section headers of the original PDF, making deep academic verification slightly difficult for the end-user.
+3. **Sequential Processing Bottleneck:** The `Paper Chunk Loop` processes document segments sequentially. For highly dense technical whitepapers (50+ pages), this linear extraction significantly increases the total workflow execution time and memory load.
+
+### Future Architectural Roadmap
+To evolve this system from a functioning prototype to a robust, production-ready product, the following upgrades are planned:
+
+* **Multi-Modal Parsing Integration:** We plan to replace the basic text extractor with an advanced OCR and Vision-LLM integration. This will allow the pipeline to interpret complex data tables and translate architectural diagrams into structured markdown, ensuring zero data loss during ingestion.
+* **Granular Citation Engine:** The extraction schema will be updated to automatically capture chunk indices. This will allow the system to append exact source citations (e.g., *[Ref: Page 14, Section 3.1]*) to every mathematical formula or algorithm listed in the final study guide.
+* **Parallel Chunk Processing:** We plan to upgrade the RAG ingestion pipeline to process text chunks asynchronously/in parallel using sub-workflows. This will drastically reduce latency, allowing the agents to quickly parse massive documents without timing out.
