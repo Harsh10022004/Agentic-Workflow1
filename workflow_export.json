@@ -1,0 +1,516 @@
+{
+  "name": "Research Paper Study Guide Generator",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Research Paper Study Guide Generator",
+        "formDescription": "Submit your research paper link and learning goals to generate a personalized study roadmap",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Your Name",
+              "fieldName": "name",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Email Address",
+              "fieldType": "email",
+              "fieldName": "email",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Research Paper Link",
+              "fieldName": "paperLink",
+              "placeholder": "https://arxiv.org/pdf/...",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Learning Goal",
+              "fieldType": "textarea",
+              "fieldName": "goal",
+              "placeholder": "What do you want to learn from this paper?",
+              "requiredField": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a7ff39ee-ca88-4a47-9047-89b01f8eb8c1",
+      "name": "Student Form Submission",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.5,
+      "position": [
+        240,
+        544
+      ],
+      "webhookId": "2ec260c6-7dfc-4e12-bfc9-be33f71d2430"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.paperLink }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "paperPdf"
+            }
+          }
+        }
+      },
+      "id": "5ff160f1-1591-4fe3-81e2-45e085bf3ecd",
+      "name": "Fetch Paper PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        464,
+        544
+      ]
+    },
+    {
+      "parameters": {
+        "fieldsToAggregate": {
+          "fieldToAggregate": [
+            {
+              "fieldToAggregate": "cleanAlgorithms",
+              "renameField": true,
+              "outputFieldName": "masterTopicList"
+            }
+          ]
+        },
+        "options": {
+          "mergeLists": true
+        }
+      },
+      "id": "b8638bc3-fa61-4338-94a1-c7adf74e48b9",
+      "name": "Aggregate All Topics",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        1136,
+        720
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst fullText = items[0].json.text || \"\";\nconst chunkSize = 500;\nconst startIndex = ($execution.resumeData?.chunkIndex || 0) * chunkSize;\nconst chunk = fullText.substring(startIndex, startIndex + chunkSize);\nreturn [{ json: { ...items[0].json, textChunk: chunk, chunkIndex: startIndex / chunkSize } }];"
+      },
+      "id": "9899b136-62a3-4700-80f4-b51e175d0d42",
+      "name": "Create Text Chunk",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1136,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Extract all mathematical concepts, algorithms, and technical terms from this text chunk:\n\n{{ $json.textChunk }}\n\nReturn a JSON array of algorithms_found.\n\nYou MUST return a JSON object. The JSON must contain a key named exactly \"algorithms_found\" which holds an array of strings. Example: {\"algorithms_found\": [\"Proof of Work\", \"SHA-256\"]}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "You are a technical information extractor. Extract mathematical concepts, algorithms, and technical terms from research papers. Return only the structured JSON output with an array of algorithms_found."
+        }
+      },
+      "id": "0a4c29b7-f897-4f7d-b62b-70298b0f6181",
+      "name": "Information Extractor AI",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        1360,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nlet output = items[0].json.output;\n\nif (typeof output === 'string') {\n    let cleanText = output.replace(/```json/gi, '').replace(/```/g, '').trim();\n    output = JSON.parse(cleanText);\n}\n\n// Bouncer (Guardrail) ki checking\nif (!output || !Array.isArray(output.algorithms_found) || output.algorithms_found.length === 0) {\n    throw new Error(\"Invalid format - retry extraction\");\n}\n\nconst cleanList = output.algorithms_found.filter(item => typeof item === \"string\" && item.trim().length > 0);\n\nreturn [{ json: { ...items[0].json, cleanAlgorithms: cleanList } }];"
+      },
+      "id": "548eda48-cf8e-4cc4-a217-06e518063583",
+      "name": "Formatting Guardrail",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1712,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "234ff3f5-0b9b-4342-a9fe-9f7f735c9a25",
+      "name": "Paper Chunk Loop",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        912,
+        544
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Evaluate the technical soundness and completeness of this extracted topic list from a research paper:\n\n{{ $json.masterTopicList }}\n\nProvide a safety_score (1-100) and detailed flaws analysis.\n\nAnalyze the text and provide a safety score. Return ONLY the raw number. Do not write any extra words, do not use JSON, do not use markdown or backticks. Just output the digits. Example: 85",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "You are a research paper critic. Evaluate extracted topics for completeness, accuracy, and technical soundness. Score 80+ means the extraction is reliable. Below 80 requires human review. Return structured JSON with safety_score (number) and flaws (string)."
+        }
+      },
+      "id": "fa5a4752-3411-4c21-b2ff-893f4067cb3f",
+      "name": "Critic AI",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        1360,
+        720
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "235e939f-bdff-4ddb-95b9-6143c7ef9e8e",
+      "name": "Merge Approval Paths",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1920,
+        736
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Create a detailed, step-by-step learning roadmap for these topics:\n\n{{ $(\"Aggregate All Topics\").item.json.masterTopicList }}\n\nStudent goal: {{ $(\"Student Form Submission\").item.json.goal }}\n\nOrder the topics from foundational to advanced. \nWrite a comprehensive and engaging study guide. Format the output beautifully using Markdown (use ## headings for main sections, bullet points for sub-topics, and **bold** text for emphasis). \n\nCRITICAL INSTRUCTION: Do NOT output a JSON array or any JSON code blocks. Return ONLY the plain markdown text so it can be directly published as a Notion page.",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "You are a curriculum designer. Create sequential learning paths that build from fundamentals to advanced concepts. Return structured JSON with a topics array ordered by prerequisite dependencies."
+        }
+      },
+      "id": "1a768a96-a60d-48cf-b4e5-6a3ee24ae828",
+      "name": "Lesson Planner AI",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        2256,
+        736
+      ]
+    },
+    {
+      "parameters": {
+        "pageId": {
+          "__rl": true,
+          "value": "https://app.notion.com/p/Welcome-to-Notion-3754f703e7b3800aac01d6b2060cce09",
+          "mode": "url"
+        },
+        "title": "AI Master Roadmap",
+        "simple": false,
+        "blockUi": {
+          "blockValues": [
+            {
+              "textContent": "={{ $json.chunk1 }}"
+            },
+            {
+              "textContent": "={{ $json.chunk2 }}"
+            },
+            {
+              "textContent": "={{ $json.chunk3 }}"
+            },
+            {
+              "textContent": "={{ $json.chunk4 }}"
+            },
+            {
+              "textContent": "={{ $json.chunk5 }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "5fbd2e6c-04c1-47e4-9b7f-24cb744e936c",
+      "name": "Create Notion Study Guide",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2.2,
+      "position": [
+        2944,
+        736
+      ],
+      "credentials": {
+        "notionApi": {
+          "id": "HPrQzMynLtF3wiHd",
+          "name": "Notion account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.1,
+      "position": [
+        1440,
+        432
+      ],
+      "id": "cdcfa984-8c7d-47cc-9c66-a5d24ffa1943",
+      "name": "Google Gemini Chat Model1",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "xH4QuMxtprHtTxzG",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.1,
+      "position": [
+        1440,
+        944
+      ],
+      "id": "cb7a2dbd-537e-42b1-818d-c7c1e0be78fb",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "xH4QuMxtprHtTxzG",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.1,
+      "position": [
+        2512,
+        1056
+      ],
+      "id": "2d500a6b-e52b-45be-bef4-edc2b0ab920c",
+      "name": "Google Gemini Chat Model2",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "xH4QuMxtprHtTxzG",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const text = $input.first().json.output || \"\";\nconst paragraphs = text.split('\\n');\n\nlet chunks = [];\nlet currentChunk = \"\";\n\nfor (let p of paragraphs) {\n  if (!p.trim()) continue; // Khali lines ko bypass karo\n  \n  // Safe limit mein paragraphs ko jodte jao\n  if ((currentChunk.length + p.length) < 1900) {\n    currentChunk += p + '\\n\\n';\n  } else {\n    if (currentChunk.trim()) chunks.push(currentChunk.trim());\n    currentChunk = p + '\\n\\n';\n  }\n}\nif (currentChunk.trim()) chunks.push(currentChunk.trim());\n\n// Complex array ke bajaye 5 simple variables bhejo (taaki Notion UI confuse na ho)\nreturn [{ \n  json: { \n    chunk1: chunks[0] || \" \",\n    chunk2: chunks[1] || \" \",\n    chunk3: chunks[2] || \" \",\n    chunk4: chunks[3] || \" \",\n    chunk5: chunks[4] || \" \"\n  } \n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2624,
+        736
+      ],
+      "id": "d25601f7-691e-4e7b-9d5e-e78135649e11",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "binaryPropertyName": "paperPdf",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        688,
+        544
+      ],
+      "id": "6767d5eb-8cde-4794-8641-94fd56f41fa0",
+      "name": "Extract from File"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Student Form Submission": {
+      "main": [
+        [
+          {
+            "node": "Fetch Paper PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Paper PDF": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate All Topics": {
+      "main": [
+        [
+          {
+            "node": "Critic AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Text Chunk": {
+      "main": [
+        [
+          {
+            "node": "Information Extractor AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Information Extractor AI": {
+      "main": [
+        [
+          {
+            "node": "Formatting Guardrail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formatting Guardrail": {
+      "main": [
+        [
+          {
+            "node": "Paper Chunk Loop",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Paper Chunk Loop": {
+      "main": [
+        [
+          {
+            "node": "Aggregate All Topics",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create Text Chunk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Critic AI": {
+      "main": [
+        [
+          {
+            "node": "Merge Approval Paths",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Approval Paths": {
+      "main": [
+        [
+          {
+            "node": "Lesson Planner AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lesson Planner AI": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Information Extractor AI",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Critic AI",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model2": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Lesson Planner AI",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Create Notion Study Guide",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Paper Chunk Loop",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "496a8ef0-b251-4e5c-b314-0d857323bb39",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "098a59e524f85f1e8d1f6881fd6a6edba3e87c55a86a11068fb31c12e941af4f"
+  },
+  "nodeGroups": [],
+  "id": "7rqzNPd8aAZIqLlo",
+  "tags": []
+}
